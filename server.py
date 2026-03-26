@@ -2,6 +2,7 @@ import os
 import random
 import re
 import json
+from itertools import islice
 
 import numpy as np
 from easydict import EasyDict as edict
@@ -29,7 +30,6 @@ DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.98"))
 XML_ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
 HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/symbolic-reasoning-env")
 HF_DATASET_CONFIG = os.getenv("RC_HF_CONFIG")
-DISABLE_HF_FALLBACK = os.getenv("RC_DISABLE_HF_FALLBACK", "0") == "1"
 
 
 class ReasoningCoreTaskSpec(BaseModel):
@@ -111,33 +111,29 @@ def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
     return normalized
 
 
+def _load_hf_split(split_name: str, split_size: int) -> list[dict]:
+    if split_size <= 0:
+        return []
+
+    from datasets import load_dataset
+
+    kwargs = {"path": HF_DATASET_NAME, "split": split_name, "streaming": True}
+    if HF_DATASET_CONFIG:
+        kwargs["name"] = HF_DATASET_CONFIG
+
+    streamed_split = load_dataset(**kwargs)
+    limited_rows = [dict(row) for row in islice(streamed_split, split_size)]
+    return _normalize_rows(limited_rows, split_name)
+
+
 def _load_hf_tasks() -> tuple[list[dict], list[dict]] | None:
-    if DISABLE_HF_FALLBACK:
-        return None
-
     try:
-        from datasets import load_dataset
-    except Exception as exc:
-        print(f"Could not import datasets for Hugging Face loading: {exc}")
-        return None
-
-    try:
-        kwargs = {"path": HF_DATASET_NAME}
-        if HF_DATASET_CONFIG:
-            kwargs["name"] = HF_DATASET_CONFIG
-        dataset = load_dataset(**kwargs)
+        train_tasks = _load_hf_split("train", DEFAULT_SPLIT_SIZES["train"])
+        test_tasks = _load_hf_split("test", DEFAULT_SPLIT_SIZES["test"])
     except Exception as exc:
         print(f"Could not load Hugging Face dataset '{HF_DATASET_NAME}': {exc}")
         return None
 
-    if "train" not in dataset or "test" not in dataset:
-        print(f"Dataset '{HF_DATASET_NAME}' does not expose both train and test splits.")
-        return None
-
-    train_rows = [dict(row) for row in dataset["train"]]
-    test_rows = [dict(row) for row in dataset["test"]]
-    train_tasks = _normalize_rows(train_rows, "train")
-    test_tasks = _normalize_rows(test_rows, "test")
     print(
         "Loaded tasks from Hugging Face dataset "
         f"'{HF_DATASET_NAME}' (train={len(train_tasks)}, test={len(test_tasks)})."
