@@ -25,7 +25,7 @@ DEFAULT_SPLIT_SIZES = {
 }
 DEFAULT_SEED = int(os.getenv("RC_SEED", "0"))
 DEFAULT_TASKS = sorted(list_tasks())
-DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.9"))
+DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.98"))
 XML_ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
 HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/symbolic-reasoning-env")
 HF_DATASET_CONFIG = os.getenv("RC_HF_CONFIG")
