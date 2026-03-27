@@ -1,6 +1,6 @@
 # reasoning-core OpenReward environment
 
-This folder contains an OpenReward-compatible ORS environment for `reasoning-core`.
+This folder contains an OpenReward-compatible ORS environment for [`reasoning-core`](https://github.com/sileod/reasoning-core/).
 
 ## Files
 
