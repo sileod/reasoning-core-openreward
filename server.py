@@ -28,8 +28,18 @@ DEFAULT_SEED = int(os.getenv("RC_SEED", "0"))
 DEFAULT_TASKS = sorted(list_tasks())
 DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.98"))
 XML_ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
-HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/symbolic-reasoning-env")
+HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/formal-reasoning-env")
 HF_DATASET_CONFIG = os.getenv("RC_HF_CONFIG")
+DISABLE_HF_FALLBACK = os.getenv("RC_DISABLE_HF_FALLBACK", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+ALLOWED_MODES = tuple(
+    mode.strip()
+    for mode in os.getenv("RC_ALLOWED_MODES", "instruct,few_shot").split(",")
+    if mode.strip()
+)
 
 
 class ReasoningCoreTaskSpec(BaseModel):
@@ -95,10 +105,16 @@ def _parse_metadata(value: object) -> dict:
 def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
     normalized: list[dict] = []
     for idx, row in enumerate(rows):
+        mode = row.get("mode")
+        if ALLOWED_MODES and mode is not None and mode not in ALLOWED_MODES:
+            continue
+
         prompt = str(row.get("prompt", "")).strip()
         answer = str(row.get("answer", "")).strip()
         task_name = str(row.get("task", "task")).strip() or "task"
         metadata = _parse_metadata(row.get("metadata", {}))
+        if mode is not None:
+            metadata = {"mode": mode, **metadata}
         sample_id = str(row.get("id", f"{prefix}-{idx}"))
         normalized.append(
             {
@@ -111,27 +127,50 @@ def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
     return normalized
 
 
-def _load_hf_split(split_name: str, split_size: int) -> list[dict]:
+def _hf_dataset_kwargs(split_name: str) -> dict:
+    kwargs = {"path": HF_DATASET_NAME, "split": split_name, "streaming": True}
+    if HF_DATASET_CONFIG:
+        kwargs["name"] = HF_DATASET_CONFIG
+    return kwargs
+
+
+def _load_hf_split(split_name: str, split_size: int, skip: int = 0) -> list[dict]:
     if split_size <= 0:
         return []
 
     from datasets import load_dataset
 
-    kwargs = {"path": HF_DATASET_NAME, "split": split_name, "streaming": True}
-    if HF_DATASET_CONFIG:
-        kwargs["name"] = HF_DATASET_CONFIG
-
-    streamed_split = load_dataset(**kwargs)
+    streamed_split = load_dataset(**_hf_dataset_kwargs(split_name))
+    if skip:
+        streamed_split = streamed_split.skip(skip)
     limited_rows = [dict(row) for row in islice(streamed_split, split_size)]
     return _normalize_rows(limited_rows, split_name)
 
 
 def _load_hf_tasks() -> tuple[list[dict], list[dict]] | None:
     try:
+        from datasets import get_dataset_split_names
+
+        split_kwargs = {"path": HF_DATASET_NAME}
+        if HF_DATASET_CONFIG:
+            split_kwargs["config_name"] = HF_DATASET_CONFIG
+        split_names = get_dataset_split_names(**split_kwargs)
+
         train_tasks = _load_hf_split("train", DEFAULT_SPLIT_SIZES["train"])
-        test_tasks = _load_hf_split("test", DEFAULT_SPLIT_SIZES["test"])
+        if "test" in split_names:
+            test_tasks = _load_hf_split("test", DEFAULT_SPLIT_SIZES["test"])
+        elif "validation" in split_names:
+            test_tasks = _load_hf_split("validation", DEFAULT_SPLIT_SIZES["test"])
+        else:
+            test_tasks = _load_hf_split(
+                "train",
+                DEFAULT_SPLIT_SIZES["test"],
+                skip=DEFAULT_SPLIT_SIZES["train"],
+            )
     except Exception as exc:
         print(f"Could not load Hugging Face dataset '{HF_DATASET_NAME}': {exc}")
+        if DISABLE_HF_FALLBACK:
+            raise
         return None
 
     print(
