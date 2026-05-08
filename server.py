@@ -28,7 +28,7 @@ DEFAULT_SEED = int(os.getenv("RC_SEED", "0"))
 DEFAULT_TASKS = sorted(list_tasks())
 DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.98"))
 XML_ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
-HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/symbolic-reasoning-env")
+HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/formal-reasoning-env")
 HF_DATASET_CONFIG = os.getenv("RC_HF_CONFIG")
 
 
@@ -111,13 +111,22 @@ def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
     return normalized
 
 
-def _load_hf_split(split_name: str, split_size: int) -> list[dict]:
+def _get_hf_split_names() -> list[str]:
+    from datasets import get_dataset_split_names
+
+    kwargs = {"path": HF_DATASET_NAME}
+    if HF_DATASET_CONFIG:
+        kwargs["config_name"] = HF_DATASET_CONFIG
+    return get_dataset_split_names(**kwargs)
+
+
+def _load_hf_split(split_name: str, source_split_name: str, split_size: int) -> list[dict]:
     if split_size <= 0:
         return []
 
     from datasets import load_dataset
 
-    kwargs = {"path": HF_DATASET_NAME, "split": split_name, "streaming": True}
+    kwargs = {"path": HF_DATASET_NAME, "split": source_split_name, "streaming": True}
     if HF_DATASET_CONFIG:
         kwargs["name"] = HF_DATASET_CONFIG
 
@@ -128,8 +137,13 @@ def _load_hf_split(split_name: str, split_size: int) -> list[dict]:
 
 def _load_hf_tasks() -> tuple[list[dict], list[dict]] | None:
     try:
-        train_tasks = _load_hf_split("train", DEFAULT_SPLIT_SIZES["train"])
-        test_tasks = _load_hf_split("test", DEFAULT_SPLIT_SIZES["test"])
+        split_names = _get_hf_split_names()
+        test_source_split = next(
+            (split for split in ("test", "validation", "eval", "dev") if split in split_names),
+            "train",
+        )
+        train_tasks = _load_hf_split("train", "train", DEFAULT_SPLIT_SIZES["train"])
+        test_tasks = _load_hf_split("test", test_source_split, DEFAULT_SPLIT_SIZES["test"])
     except Exception as exc:
         print(f"Could not load Hugging Face dataset '{HF_DATASET_NAME}': {exc}")
         return None
