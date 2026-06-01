@@ -26,6 +26,7 @@ DEFAULT_SPLIT_SIZES = {
 }
 DEFAULT_SEED = int(os.getenv("RC_SEED", "0"))
 DEFAULT_TASKS = sorted(list_tasks())
+AVAILABLE_TASKS = set(DEFAULT_TASKS)
 DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.98"))
 XML_ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
 HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/formal-reasoning-env")
@@ -92,13 +93,28 @@ def _parse_metadata(value: object) -> dict:
     return {}
 
 
+def _row_task_name(row: dict, metadata: dict) -> str | None:
+    task_name = (
+        metadata.get("_task")
+        or row.get("task")
+        or metadata.get("task")
+    )
+    if task_name is None:
+        return None
+    return str(task_name).strip() or None
+
+
 def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
     normalized: list[dict] = []
+    skipped = 0
     for idx, row in enumerate(rows):
         prompt = str(row.get("prompt", "")).strip()
         answer = str(row.get("answer", "")).strip()
-        task_name = str(row.get("task", "task")).strip() or "task"
         metadata = _parse_metadata(row.get("metadata", {}))
+        task_name = _row_task_name(row, metadata)
+        if task_name not in AVAILABLE_TASKS:
+            skipped += 1
+            continue
         sample_id = str(row.get("id", f"{prefix}-{idx}"))
         normalized.append(
             {
@@ -108,6 +124,8 @@ def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
                 "metadata": {"task": task_name, **metadata},
             }
         )
+    if skipped:
+        print(f"Ignored {skipped} Hugging Face rows with unavailable tasks.")
     return normalized
 
 
