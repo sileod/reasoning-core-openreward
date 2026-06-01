@@ -104,7 +104,14 @@ def _row_task_name(row: dict, metadata: dict) -> str | None:
     return str(task_name).strip() or None
 
 
-def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
+def _rotate_rows(rows: list[dict], seed: int) -> list[dict]:
+    if not rows:
+        return rows
+    offset = random.Random(seed).randrange(len(rows))
+    return rows[offset:] + rows[:offset]
+
+
+def _normalize_rows(rows: list[dict], prefix: str, seed: int) -> list[dict]:
     normalized: list[dict] = []
     skipped = 0
     for idx, row in enumerate(rows):
@@ -126,7 +133,7 @@ def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
         )
     if skipped:
         print(f"Ignored {skipped} Hugging Face rows with unavailable tasks.")
-    return normalized
+    return _rotate_rows(normalized, seed)
 
 
 def _get_hf_split_names() -> list[str]:
@@ -138,7 +145,12 @@ def _get_hf_split_names() -> list[str]:
     return get_dataset_split_names(**kwargs)
 
 
-def _load_hf_split(split_name: str, source_split_name: str, split_size: int) -> list[dict]:
+def _load_hf_split(
+    split_name: str,
+    source_split_name: str,
+    split_size: int,
+    seed: int,
+) -> list[dict]:
     if split_size <= 0:
         return []
 
@@ -150,7 +162,7 @@ def _load_hf_split(split_name: str, source_split_name: str, split_size: int) -> 
 
     streamed_split = load_dataset(**kwargs)
     limited_rows = [dict(row) for row in islice(streamed_split, split_size)]
-    return _normalize_rows(limited_rows, split_name)
+    return _normalize_rows(limited_rows, split_name, seed)
 
 
 def _load_hf_tasks() -> tuple[list[dict], list[dict]] | None:
@@ -160,8 +172,18 @@ def _load_hf_tasks() -> tuple[list[dict], list[dict]] | None:
             (split for split in ("test", "validation", "eval", "dev") if split in split_names),
             "train",
         )
-        train_tasks = _load_hf_split("train", "train", DEFAULT_SPLIT_SIZES["train"])
-        test_tasks = _load_hf_split("test", test_source_split, DEFAULT_SPLIT_SIZES["test"])
+        train_tasks = _load_hf_split(
+            "train",
+            "train",
+            DEFAULT_SPLIT_SIZES["train"],
+            DEFAULT_SEED,
+        )
+        test_tasks = _load_hf_split(
+            "test",
+            test_source_split,
+            DEFAULT_SPLIT_SIZES["test"],
+            DEFAULT_SEED + 10_000,
+        )
     except Exception as exc:
         print(f"Could not load Hugging Face dataset '{HF_DATASET_NAME}': {exc}")
         return None
