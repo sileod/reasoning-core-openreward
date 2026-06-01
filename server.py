@@ -31,6 +31,7 @@ DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.98"))
 XML_ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
 HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/formal-reasoning-env")
 HF_DATASET_CONFIG = os.getenv("RC_HF_CONFIG")
+HF_SHUFFLE_BUFFER_SIZE = int(os.getenv("RC_HF_SHUFFLE_BUFFER_SIZE", "10000"))
 
 
 class ReasoningCoreTaskSpec(BaseModel):
@@ -104,13 +105,6 @@ def _row_task_name(row: dict, metadata: dict) -> str | None:
     return str(task_name).strip() or None
 
 
-def _rotate_rows(rows: list[dict], seed: int) -> list[dict]:
-    if not rows:
-        return rows
-    offset = random.Random(seed).randrange(len(rows))
-    return rows[offset:] + rows[:offset]
-
-
 def _normalize_rows(rows: list[dict], prefix: str, seed: int) -> list[dict]:
     normalized: list[dict] = []
     skipped = 0
@@ -133,7 +127,7 @@ def _normalize_rows(rows: list[dict], prefix: str, seed: int) -> list[dict]:
         )
     if skipped:
         print(f"Ignored {skipped} Hugging Face rows with unavailable tasks.")
-    return _rotate_rows(normalized, seed)
+    return normalized
 
 
 def _get_hf_split_names() -> list[str]:
@@ -160,7 +154,10 @@ def _load_hf_split(
     if HF_DATASET_CONFIG:
         kwargs["name"] = HF_DATASET_CONFIG
 
-    streamed_split = load_dataset(**kwargs)
+    streamed_split = load_dataset(**kwargs).shuffle(
+        seed=seed,
+        buffer_size=HF_SHUFFLE_BUFFER_SIZE,
+    )
     limited_rows = [dict(row) for row in islice(streamed_split, split_size)]
     return _normalize_rows(limited_rows, split_name, seed)
 
