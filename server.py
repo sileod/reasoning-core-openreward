@@ -31,7 +31,6 @@ DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.98"))
 XML_ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
 HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/formal-reasoning-env")
 HF_DATASET_CONFIG = os.getenv("RC_HF_CONFIG")
-HF_SHUFFLE_BUFFER_SIZE = int(os.getenv("RC_HF_SHUFFLE_BUFFER_SIZE", "10000"))
 
 
 class ReasoningCoreTaskSpec(BaseModel):
@@ -105,7 +104,7 @@ def _row_task_name(row: dict, metadata: dict) -> str | None:
     return str(task_name).strip() or None
 
 
-def _normalize_rows(rows: list[dict], prefix: str, seed: int) -> list[dict]:
+def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
     normalized: list[dict] = []
     skipped = 0
     for idx, row in enumerate(rows):
@@ -143,7 +142,6 @@ def _load_hf_split(
     split_name: str,
     source_split_name: str,
     split_size: int,
-    seed: int,
 ) -> list[dict]:
     if split_size <= 0:
         return []
@@ -154,12 +152,9 @@ def _load_hf_split(
     if HF_DATASET_CONFIG:
         kwargs["name"] = HF_DATASET_CONFIG
 
-    streamed_split = load_dataset(**kwargs).shuffle(
-        seed=seed,
-        buffer_size=HF_SHUFFLE_BUFFER_SIZE,
-    )
+    streamed_split = load_dataset(**kwargs)
     limited_rows = [dict(row) for row in islice(streamed_split, split_size)]
-    return _normalize_rows(limited_rows, split_name, seed)
+    return _normalize_rows(limited_rows, split_name)
 
 
 def _load_hf_tasks() -> tuple[list[dict], list[dict]] | None:
@@ -173,13 +168,11 @@ def _load_hf_tasks() -> tuple[list[dict], list[dict]] | None:
             "train",
             "train",
             DEFAULT_SPLIT_SIZES["train"],
-            DEFAULT_SEED,
         )
         test_tasks = _load_hf_split(
             "test",
             test_source_split,
             DEFAULT_SPLIT_SIZES["test"],
-            DEFAULT_SEED + 10_000,
         )
     except Exception as exc:
         print(f"Could not load Hugging Face dataset '{HF_DATASET_NAME}': {exc}")
