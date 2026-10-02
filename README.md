@@ -36,10 +36,10 @@ Set optional environment variables before launch:
 - `RC_NUM_TRAIN` (default `500`)
 - `RC_NUM_TEST` (default `50`)
 - `RC_SEED` (default `0`)
-- `RC_PASS_THRESHOLD` (default `0.9`)
-- `RC_HF_DATASET` (default `reasoning-core/formal-reasoning-env`)
+- `RC_PASS_THRESHOLD` (default `0.98`)
+- `RC_HF_DATASET` (default `reasoning-core/procedural-pile`)
+- `RC_HF_REVISION` (optional tag or commit of the dataset, to pin the tasks)
 - `RC_HF_CONFIG` (optional dataset config name)
-- `RC_DISABLE_HF_FALLBACK=1` to disable Hugging Face loading and use procedural fallback
 
 The task order is deterministic for fixed values of these variables.
 
@@ -47,7 +47,7 @@ The task order is deterministic for fixed values of these variables.
 
 - The environment exposes a single `answer` tool.
 - The tool returns a human-readable result with a rounded reward (`reward=0.000` format).
-- "Accepted" is intentionally lenient and defaults to `reward >= 0.9` (configurable via `RC_PASS_THRESHOLD`).
+- "Accepted" defaults to `reward >= 0.98` (configurable via `RC_PASS_THRESHOLD`).
 - The tool accepts either plain-text answers or XML-wrapped answers (`<answer>...</answer>`), matching common evaluator output formats.
-- By default, tasks are loaded from Hugging Face dataset `reasoning-core/formal-reasoning-env`. If the dataset has no native test split, test tasks are sampled from train.
+- By default, tasks are the first rows of [`reasoning-core/procedural-pile`](https://huggingface.co/datasets/reasoning-core/procedural-pile) (pre-shuffled, all task families within the first few hundred rows). Rows whose task has no scorer in the installed `reasoning-core` are skipped. If the dataset has no native test split, test tasks are sampled from train.
 - If Hugging Face loading fails, the environment falls back to deterministic procedural task generation.

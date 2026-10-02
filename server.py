@@ -2,6 +2,7 @@ import os
 import random
 import re
 import json
+from functools import cache
 from itertools import islice
 
 import numpy as np
@@ -17,7 +18,7 @@ from openreward.environments import (
     ToolOutput,
     tool,
 )
-from reasoning_core import get_task, list_tasks, score_answer
+from reasoning_core import get_score_answer_fn, get_task, list_tasks, score_answer
 
 
 DEFAULT_SPLIT_SIZES = {
@@ -26,11 +27,13 @@ DEFAULT_SPLIT_SIZES = {
 }
 DEFAULT_SEED = int(os.getenv("RC_SEED", "0"))
 DEFAULT_TASKS = sorted(list_tasks())
-AVAILABLE_TASKS = set(DEFAULT_TASKS)
 DEFAULT_PASS_THRESHOLD = float(os.getenv("RC_PASS_THRESHOLD", "0.98"))
 XML_ANSWER_PATTERN = re.compile(r"<answer>(.*?)</answer>", re.IGNORECASE | re.DOTALL)
-HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/formal-reasoning-env")
+HF_DATASET_NAME = os.getenv("RC_HF_DATASET", "reasoning-core/procedural-pile")
 HF_DATASET_CONFIG = os.getenv("RC_HF_CONFIG")
+# a tag or commit of the dataset; rows are read in stored order (the pile is pre-shuffled), so a pinned
+# revision fixes the tasks exactly
+HF_DATASET_REVISION = os.getenv("RC_HF_REVISION") or None
 
 
 class ReasoningCoreTaskSpec(BaseModel):
@@ -104,6 +107,16 @@ def _row_task_name(row: dict, metadata: dict) -> str | None:
     return str(task_name).strip() or None
 
 
+@cache
+def _is_scorable(task_name: str | None) -> bool:
+    """Roster and parked tasks both count: the pile keeps rows of tasks parked after its release."""
+    try:
+        get_score_answer_fn(task_name)
+        return True
+    except (ValueError, KeyError, ImportError):
+        return False
+
+
 def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
     normalized: list[dict] = []
     skipped = 0
@@ -112,7 +125,7 @@ def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
         answer = str(row.get("answer", "")).strip()
         metadata = _parse_metadata(row.get("metadata", {}))
         task_name = _row_task_name(row, metadata)
-        if task_name not in AVAILABLE_TASKS:
+        if not _is_scorable(task_name):
             skipped += 1
             continue
         sample_id = str(row.get("id", f"{prefix}-{idx}"))
@@ -132,7 +145,7 @@ def _normalize_rows(rows: list[dict], prefix: str) -> list[dict]:
 def _get_hf_split_names() -> list[str]:
     from datasets import get_dataset_split_names
 
-    kwargs = {"path": HF_DATASET_NAME}
+    kwargs = {"path": HF_DATASET_NAME, "revision": HF_DATASET_REVISION}
     if HF_DATASET_CONFIG:
         kwargs["config_name"] = HF_DATASET_CONFIG
     return get_dataset_split_names(**kwargs)
@@ -148,7 +161,8 @@ def _load_hf_split(
 
     from datasets import load_dataset
 
-    kwargs = {"path": HF_DATASET_NAME, "split": source_split_name, "streaming": True}
+    kwargs = {"path": HF_DATASET_NAME, "split": source_split_name, "streaming": True,
+              "revision": HF_DATASET_REVISION}
     if HF_DATASET_CONFIG:
         kwargs["name"] = HF_DATASET_CONFIG
 
